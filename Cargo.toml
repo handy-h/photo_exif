@@ -1,0 +1,21 @@
+[package]
+name = "photo_exit"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.27"
+image = { version = "0.25", features = ["jpeg", "png", "webp", "tiff", "bmp"] }
+exif = { git = "https://github.com/kamadak/exif-rs.git" }
+rfd = "0.14"
+chrono = "0.4"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dirs = "5.0"
+
+[profile.release]
+opt-level = 2
+lto = true
+codegen-units = 1
+strip = true
