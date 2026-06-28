@@ -5,7 +5,7 @@ use std::path::PathBuf;
 // ExifGroup - EXIF 字段分组
 // ============================================================================
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ExifGroup {
     CameraInfo,
     Exposure,
@@ -154,7 +154,7 @@ pub struct ExtensionMismatch {
 // AppState - 应用全局状态
 // ============================================================================
 
-#[derive(Debug)]
+/// AppState - 应用全局状态
 pub struct AppState {
     // 文件列表
     pub folder_path: Option<PathBuf>,
@@ -187,6 +187,35 @@ pub struct AppState {
 
     // 批量操作
     pub clipboard_exif: Option<HashMap<ExifTag, ExifValue>>,
+
+    // 写入确认对话框
+    pub pending_save: bool,
+
+    // 快捷编辑面板
+    pub show_quick_edit: bool,
+
+    // 缩略图画廊
+    pub thumbnails: Vec<ThumbnailInfo>,
+    pub thumbnail_scroll: f32,
+
+    // 1:1 像素视图模式
+    pub pixel_perfect: bool,
+
+    // 对比模式
+    pub compare_state: crate::ui::compare::CompareState,
+
+    // GPX 写入窗口
+    pub gpx_window: crate::ui::gpx_window::GpxWindowState,
+
+    // EXIF 修复窗口
+    pub repair_window: crate::ui::repair_window::RepairWindowState,
+}
+
+#[derive(Debug, Clone)]
+pub struct ThumbnailInfo {
+    pub path: PathBuf,
+    pub image: Option<egui::ColorImage>,
+    pub is_loading: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -225,6 +254,14 @@ impl AppState {
             pending_rename: None,
             status_message: None,
             clipboard_exif: None,
+            pending_save: false,
+            show_quick_edit: false,
+            thumbnails: Vec::new(),
+            thumbnail_scroll: 0.0,
+            pixel_perfect: false,
+            compare_state: Default::default(),
+            gpx_window: Default::default(),
+            repair_window: Default::default(),
         }
     }
 
@@ -258,5 +295,50 @@ impl AppState {
 
     pub fn clear_status(&mut self) {
         self.status_message = None;
+    }
+
+    /// 检测当前 EXIF 是否有隐私风险（GPS / 个人信息）
+    pub fn has_privacy_risk(&self) -> Vec<ExifTag> {
+        self.exif_entries
+            .keys()
+            .filter(|tag| {
+                // GPS 相关
+                tag.ifd == "GPS"
+                // 版权
+                || tag.id == 0x8298
+                // 制造商备注（可能含序列号）
+                || tag.id == 0x927C
+                // 用户注释
+                || tag.id == 0x9286
+                // 镜头序列号等
+                || tag.id == 0xA435
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// 获取变更列表（用于写入确认）
+    pub fn get_changes(&self) -> Vec<(ExifTag, Option<ExifValue>, Option<ExifValue>)> {
+        let mut changes = Vec::new();
+
+        // 修改和新增
+        for (tag, value) in &self.exif_entries {
+            if let Some(orig) = self.original_exif.get(tag) {
+                if orig != value {
+                    changes.push((tag.clone(), Some(orig.clone()), Some(value.clone())));
+                }
+            } else {
+                changes.push((tag.clone(), None, Some(value.clone())));
+            }
+        }
+
+        // 删除
+        for (tag, value) in &self.original_exif {
+            if !self.exif_entries.contains_key(tag) {
+                changes.push((tag.clone(), Some(value.clone()), None));
+            }
+        }
+
+        changes
     }
 }

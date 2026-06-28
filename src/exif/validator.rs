@@ -1,7 +1,7 @@
 use crate::model::ExtensionMismatch;
 use anyhow::Result;
 use image::ImageFormat;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// EXIF 和文件格式验证器
 pub struct ExifValidator;
@@ -9,17 +9,18 @@ pub struct ExifValidator;
 impl ExifValidator {
     /// 检测图片实际格式（通过 magic bytes）
     pub fn detect_format(path: &Path) -> Result<Option<ImageFormat>> {
-        let file = std::fs::File::open(path)?;
-        let mut reader = std::io::BufReader::new(file);
-        let format = image::guess_format(&mut reader)?;
+        let header = std::fs::read(path)?;
+        if header.len() < 2 {
+            return Ok(None);
+        }
+        let format = image::guess_format(&header)?;
         Ok(Some(format))
     }
 
     /// 检测文件扩展名是否与实际格式匹配
     pub fn check_extension(path: &Path) -> Result<Option<ExtensionMismatch>> {
-        let file = std::fs::File::open(path)?;
-        let mut reader = std::io::BufReader::new(file);
-        let actual_format = match image::guess_format(&mut reader) {
+        let header = std::fs::read(path)?;
+        let actual_format = match image::guess_format(&header) {
             Ok(f) => f,
             Err(_) => return Ok(None),
         };
@@ -31,7 +32,11 @@ impl ExifValidator {
             .unwrap_or_default();
 
         let expected_exts = actual_format.extensions_str();
-        let expected_ext = expected_exts.into_iter().next().unwrap_or("bin");
+        let expected_ext = expected_exts
+            .into_iter()
+            .next()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "bin".to_string());
 
         if actual_ext.is_empty() {
             return Ok(Some(ExtensionMismatch {
@@ -41,7 +46,7 @@ impl ExifValidator {
             }));
         }
 
-        if actual_ext != expected_ext {
+        if !expected_exts.contains(&actual_ext.as_str()) {
             return Ok(Some(ExtensionMismatch {
                 actual_format: Self::format_name(actual_format),
                 expected_ext: format!(".{}", expected_ext),
@@ -62,7 +67,6 @@ impl ExifValidator {
             ImageFormat::Tiff => "TIFF".into(),
             ImageFormat::Bmp => "BMP".into(),
             ImageFormat::Dds => "DDS".into(),
-            ImageFormat::Dng => "DNG".into(),
             ImageFormat::Hdr => "HDR".into(),
             ImageFormat::Ico => "ICO".into(),
             ImageFormat::OpenExr => "OpenEXR".into(),
@@ -76,7 +80,12 @@ impl ExifValidator {
     /// 修正文件扩展名
     pub fn fix_extension(path: &Path) -> Result<PathBuf> {
         let new_ext = Self::detect_format(path)?
-            .and_then(|f| f.extensions_str().into_iter().next().map(|s| s.to_string()))
+            .and_then(|f| {
+                f.extensions_str()
+                    .into_iter()
+                    .next()
+                    .map(|s| s.to_string())
+            })
             .unwrap_or_else(|| "bin".to_string());
 
         let new_path = if let Some(stem) = path.file_stem() {

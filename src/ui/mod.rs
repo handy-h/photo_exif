@@ -1,9 +1,19 @@
-pub mod preview;
 pub mod exif_panel;
+pub mod preview;
 pub mod toolbar;
+pub mod thumbnail_bar;
 pub mod shortcuts;
+pub mod compare;
+pub mod gpx_window;
+pub mod repair_window;
+pub mod left_panel;
 
-pub use preview::render_preview_panel;
 pub use exif_panel::render_exif_panel;
+pub use preview::render_preview_panel;
 pub use toolbar::render_toolbar;
+pub use thumbnail_bar::render_thumbnail_bar;
 pub use shortcuts::handle_shortcuts;
+pub use compare::render_compare_window;
+pub use gpx_window::render_gpx_window;
+pub use repair_window::render_repair_window;
+pub use left_panel::render_left_panel;

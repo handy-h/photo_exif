@@ -1,4 +1,4 @@
-use crate::model::{AppState, ExifEntry, ExifGroup, ExifTag, ExifValue};
+use crate::model::{AppState, ExifTag, ExifValue};
 use crate::exif::ExifFormatter;
 
 /// 渲染右侧 EXIF 信息面板
@@ -7,14 +7,32 @@ pub fn render_exif_panel(app: &mut AppState, ctx: &egui::Context) {
         return;
     }
 
+    // 写入确认对话框
+    if app.pending_save {
+        render_save_confirmation(app, ctx);
+    }
+
     egui::SidePanel::right("exif_panel")
         .resizable(true)
         .default_width(450.0)
         .show(ctx, |ui| {
             ui.vertical(|ui| {
                 render_extension_warning(app, ui);
+                render_privacy_warning(app, ui);
                 render_search_bar(app, ui);
                 ui.separator();
+
+                // 快捷编辑面板切换
+                ui.horizontal(|ui| {
+                    if ui.button("📋 快捷编辑").clicked() {
+                        app.show_quick_edit = !app.show_quick_edit;
+                    }
+                });
+
+                if app.show_quick_edit {
+                    render_quick_edit_panel(app, ui);
+                    ui.separator();
+                }
 
                 if app.exif_entries.is_empty() {
                     ui.centered_and_justified(|ui| {
@@ -29,22 +47,51 @@ pub fn render_exif_panel(app: &mut AppState, ctx: &egui::Context) {
 }
 
 fn render_extension_warning(app: &mut AppState, ui: &mut egui::Ui) {
-    if let Some(mismatch) = &app.extension_warning {
+    let mismatch = match &app.extension_warning {
+        Some(m) => m.clone(),
+        None => return,
+    };
+    ui.group(|ui| {
+        ui.horizontal(|ui| {
+            ui.colored_label(egui::Color32::YELLOW, "⚠");
+            ui.label(format!(
+                "实际格式: {}, 扩展名: {}",
+                mismatch.actual_format, mismatch.actual_ext
+            ));
+        });
+
+        ui.horizontal(|ui| {
+            if ui.button("修正扩展名").clicked() {
+                let _ = crate::io::FileOps::fix_extension(app);
+            }
+            if ui.button("忽略").clicked() {
+                app.extension_warning = None;
+            }
+        });
+    });
+    ui.add_space(4.0);
+}
+
+fn render_privacy_warning(app: &mut AppState, ui: &mut egui::Ui) {
+    let risks = app.has_privacy_risk();
+    if !risks.is_empty() {
         ui.group(|ui| {
             ui.horizontal(|ui| {
-                ui.colored_label(egui::Color32::YELLOW, "⚠");
-                ui.label(format!(
-                    "实际格式: {}, 扩展名: {}",
-                    mismatch.actual_format, mismatch.actual_ext
-                ));
+                ui.colored_label(egui::Color32::RED, "🔒");
+                ui.colored_label(
+                    egui::Color32::RED,
+                    format!("检测到 {} 个隐私相关字段（GPS/个人信息）", risks.len()),
+                );
             });
-
             ui.horizontal(|ui| {
-                if ui.button("修正扩展名").clicked() {
-                    let _ = crate::io::FileOps::fix_extension(app);
-                }
-                if ui.button("忽略").clicked() {
-                    app.extension_warning = None;
+                if ui.button("一键清除隐私字段").clicked() {
+                    for tag in &risks {
+                        app.exif_entries.remove(tag);
+                    }
+                    app.set_status(
+                        format!("已清除 {} 个隐私字段", risks.len()),
+                        crate::model::StatusLevel::Success,
+                    );
                 }
             });
         });
@@ -55,21 +102,101 @@ fn render_extension_warning(app: &mut AppState, ui: &mut egui::Ui) {
 fn render_search_bar(app: &mut AppState, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui.label("🔍");
-        let response = ui.text_edit_singleline(&mut app.search_query);
-        if response.changed() && app.search_query.is_empty() {
-            // 搜索清空，显示所有
-        }
+        ui.text_edit_singleline(&mut app.search_query);
         if ui.button("✕").clicked() {
             app.search_query.clear();
         }
     });
 }
 
+fn render_quick_edit_panel(app: &mut AppState, ui: &mut egui::Ui) {
+    ui.group(|ui| {
+        ui.heading("快捷编辑");
+
+        // 获取常用字段的当前值
+        let mut date_time = get_field_value(app, 0x9003, "ExifIFD");
+        let mut iso = get_field_value(app, 0x8827, "ExifIFD");
+        let mut aperture = get_field_value(app, 0x829D, "ExifIFD");
+        let mut shutter = get_field_value(app, 0x829A, "ExifIFD");
+        let mut focal = get_field_value(app, 0x920A, "ExifIFD");
+        let mut gps_lat = get_field_value(app, 0x0002, "GPS");
+        let mut gps_lon = get_field_value(app, 0x0004, "GPS");
+
+        egui::Grid::new("quick_edit_grid")
+            .num_columns(2)
+            .spacing([10.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("拍摄时间:");
+                if ui.text_edit_singleline(&mut date_time).changed() {
+                    set_field_value(app, 0x9003, "ExifIFD", "拍摄时间", &date_time);
+                }
+                ui.end_row();
+
+                ui.label("ISO:");
+                if ui.text_edit_singleline(&mut iso).changed() {
+                    set_field_value(app, 0x8827, "ExifIFD", "ISO", &iso);
+                }
+                ui.end_row();
+
+                ui.label("光圈值:");
+                if ui.text_edit_singleline(&mut aperture).changed() {
+                    set_field_value(app, 0x829D, "ExifIFD", "光圈值", &aperture);
+                }
+                ui.end_row();
+
+                ui.label("快门速度:");
+                if ui.text_edit_singleline(&mut shutter).changed() {
+                    set_field_value(app, 0x829A, "ExifIFD", "曝光时间", &shutter);
+                }
+                ui.end_row();
+
+                ui.label("焦距:");
+                if ui.text_edit_singleline(&mut focal).changed() {
+                    set_field_value(app, 0x920A, "ExifIFD", "焦距", &focal);
+                }
+                ui.end_row();
+
+                ui.label("GPS 纬度:");
+                if ui.text_edit_singleline(&mut gps_lat).changed() {
+                    set_field_value(app, 0x0002, "GPS", "纬度", &gps_lat);
+                }
+                ui.end_row();
+
+                ui.label("GPS 经度:");
+                if ui.text_edit_singleline(&mut gps_lon).changed() {
+                    set_field_value(app, 0x0004, "GPS", "经度", &gps_lon);
+                }
+                ui.end_row();
+            });
+    });
+}
+
+fn get_field_value(app: &AppState, id: u16, ifd: &str) -> String {
+    for (tag, value) in &app.exif_entries {
+        if tag.id == id && tag.ifd == ifd {
+            return value.to_display_string();
+        }
+    }
+    String::new()
+}
+
+fn set_field_value(app: &mut AppState, id: u16, ifd: &str, name: &str, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    let tag = ExifTag::new(id, ifd, name);
+    let new_value = ExifValue::from_string(text);
+    if let Some(old_value) = app.exif_entries.get(&tag) {
+        app.push_undo(tag.clone(), old_value.clone(), new_value.clone());
+    } else {
+        app.push_undo(tag.clone(), ExifValue::Ascii(String::new()), new_value.clone());
+    }
+    app.exif_entries.insert(tag, new_value);
+}
+
 fn render_exif_table(app: &mut AppState, ui: &mut egui::Ui) {
-    // 获取分组后的条目
     let grouped = group_exif_entries(&app.exif_entries);
 
-    // 过滤
     let search = app.search_query.to_lowercase();
 
     for (group, entries) in grouped {
@@ -90,49 +217,57 @@ fn render_exif_table(app: &mut AppState, ui: &mut egui::Ui) {
             continue;
         }
 
-        ui.group(|ui| {
-            let is_expanded = app.expanded_groups.entry(group).or_insert(true);
-            let header = egui::CollapsingHeader::new(group.label())
-                .default_open(*is_expanded)
-                .show(ui, |ui| {
-                    for (tag, value) in &filtered {
-                        render_exif_row(app, ui, tag, value);
-                    }
-                });
+        let is_expanded = *app
+            .expanded_groups
+            .entry(group)
+            .or_insert(group.default_expanded());
 
-            // 更新展开状态
-            if header.inner {
-                *is_expanded = true;
-            } else if header.fully_open() || !header.fully_closed() {
-                // 检测是否被用户切换
-            }
-        });
+        egui::CollapsingHeader::new(group.label())
+            .default_open(is_expanded)
+            .show(ui, |ui| {
+                for (tag, value) in &filtered {
+                    render_exif_row(app, ui, tag, value);
+                }
+            });
     }
 }
 
 fn render_exif_row(app: &mut AppState, ui: &mut egui::Ui, tag: &ExifTag, value: &ExifValue) {
+    // 隐私风险高亮
+    let is_privacy = tag.ifd == "GPS"
+        || tag.id == 0x8298
+        || tag.id == 0x927C
+        || tag.id == 0x9286
+        || tag.id == 0xA435;
+
+    let is_selected = app.selected_tags.contains(tag);
+    let is_editing = app.editing_tag.as_ref() == Some(tag);
+
     ui.horizontal(|ui| {
         // 选择框
-        let is_selected = app.selected_tags.contains(tag);
-        if ui.checkbox(&mut is_selected.then(|| true).unwrap_or(false), "").changed() {
-            if is_selected {
-                app.selected_tags.retain(|t| t != tag);
-            } else {
+        let mut checked = is_selected;
+        if ui.checkbox(&mut checked, "").changed() {
+            if checked && !is_selected {
                 app.selected_tags.push(tag.clone());
+            } else if !checked && is_selected {
+                app.selected_tags.retain(|t| t != tag);
             }
         }
 
-        // Tag 名
-        ui.label(format!("{}:", tag.name));
+        // Tag 名（隐私字段红色高亮）
+        if is_privacy {
+            ui.colored_label(egui::Color32::from_rgb(255, 100, 100), format!("{}:", tag.name));
+        } else {
+            ui.label(format!("{}:", tag.name));
+        }
 
         // 值 - 可编辑
         let display_value = ExifFormatter::format(tag.id, value);
-        let is_editing = app.editing_tag.as_ref() == Some(tag);
 
         if is_editing {
             let mut text = value.to_display_string();
             let response = ui.text_edit_singleline(&mut text);
-            if response.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            if response.lost_focus() {
                 if !text.is_empty() {
                     let old_value = value.clone();
                     let new_value = ExifValue::from_string(&text);
@@ -145,15 +280,77 @@ fn render_exif_row(app: &mut AppState, ui: &mut egui::Ui, tag: &ExifTag, value: 
                 app.editing_tag = None;
             }
         } else {
-            ui.label(&display_value);
+            // 双击进入编辑
+            let label_response = ui.label(&display_value);
+            if label_response.double_clicked() {
+                app.editing_tag = Some(tag.clone());
+            }
         }
     });
+}
 
-    // 双击编辑
-    let row_rect = ui.max_rect();
-    if ui.input(|i| i.pointer.is_missing()) {
-        // 处理双击
-    }
+fn render_save_confirmation(app: &mut AppState, ctx: &egui::Context) {
+    let changes = app.get_changes();
+
+    egui::Window::new("确认保存")
+        .collapsible(false)
+        .resizable(false)
+        .show(ctx, |ui| {
+            if changes.is_empty() {
+                ui.label("没有需要保存的更改");
+                if ui.button("关闭").clicked() {
+                    app.pending_save = false;
+                }
+                return;
+            }
+
+            ui.label(format!("即将修改 {} 个字段：", changes.len()));
+            ui.add_space(4.0);
+
+            egui::ScrollArea::vertical()
+                .max_height(300.0)
+                .show(ui, |ui| {
+                    egui::Grid::new("changes_grid")
+                        .num_columns(3)
+                        .spacing([10.0, 4.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.heading("字段");
+                            ui.heading("原值");
+                            ui.heading("新值");
+                            ui.end_row();
+
+                            for (tag, old, new) in &changes {
+                                ui.label(&tag.name);
+                                ui.label(
+                                    old.as_ref()
+                                        .map(|v| v.to_display_string())
+                                        .unwrap_or_else(|| "(新增)".into()),
+                                );
+                                ui.label(
+                                    new.as_ref()
+                                        .map(|v| v.to_display_string())
+                                        .unwrap_or_else(|| "(删除)".into()),
+                                );
+                                ui.end_row();
+                            }
+                        });
+                });
+
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("✅ 确认保存").clicked() {
+                    let result = crate::io::FileOps::do_save(app);
+                    if let Err(e) = result {
+                        app.set_status(format!("保存失败: {}", e), crate::model::StatusLevel::Error);
+                    }
+                    app.pending_save = false;
+                }
+                if ui.button("❌ 取消").clicked() {
+                    app.pending_save = false;
+                }
+            });
+        });
 }
 
 fn group_exif_entries(
@@ -182,7 +379,7 @@ fn tag_to_group(tag: &crate::model::ExifTag) -> crate::model::ExifGroup {
         // Thumbnail
         ("Thumbnail", _) => ExifGroup::Thumbnail,
         // 曝光参数
-        (_, 0x829A) | (_, 0x829D) | (_, 0x8827) | (_, 0x9204) | (_, 0x8822) | (_, 0x9207)
+        (_, 0x829A) | (_, 0x829D) | (_, 0x9204) | (_, 0x8822) | (_, 0x9207)
         | (_, 0x9208) | (_, 0x9209) | (_, 0x9214) | (_, 0xA405) | (_, 0xA406) => ExifGroup::Exposure,
         // 镜头信息
         (_, 0xA432) | (_, 0xA433) | (_, 0xA434) | (_, 0xA435) | (_, 0xA436) | (_, 0xA437) => {
