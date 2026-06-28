@@ -281,7 +281,7 @@ fn render_exif_row(app: &mut AppState, ui: &mut egui::Ui, tag: &ExifTag, value: 
             }
         } else {
             // 双击进入编辑
-            let label_response = ui.label(&display_value);
+            let label_response = ui.add(egui::Label::new(&display_value).wrap(true));
             if label_response.double_clicked() {
                 app.editing_tag = Some(tag.clone());
             }
