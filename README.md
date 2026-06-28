@@ -47,8 +47,8 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/yourusername/photo-exif-tool.git
-cd photo-exif-tool
+git clone git@github.com:handy-h/photo_exif.git
+cd photo_exif
 
 # 编译
 cargo build --release
@@ -59,7 +59,7 @@ cargo build --release
 
 ### 预编译二进制
 
-从 [Releases](https://github.com/yourusername/photo-exif-tool/releases) 页面下载对应平台的可执行文件。
+从 [Releases](https://github.com/handy-h/photo_exif/releases) 页面下载对应平台的可执行文件。
 
 ## 使用指南
 
