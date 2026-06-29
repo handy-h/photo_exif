@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+﻿use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -28,7 +28,7 @@ impl GpxParser {
     /// 解析 GPX 字符串
     pub fn parse_str(content: &str) -> Result<Vec<GpxPoint>> {
         let mut reader = Reader::from_str(content);
-        reader.trim_text(true);
+        
 
         let mut points = Vec::new();
         let mut buf = Vec::new();
@@ -79,7 +79,7 @@ impl GpxParser {
                 }
                 Ok(Event::Text(e)) => {
                     if in_ele || in_time {
-                        text_buf.push_str(&e.unescape()?);
+                        text_buf.push_str(&e.decode()?);
                     }
                 }
                 Ok(Event::End(e)) => {

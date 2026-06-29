@@ -41,3 +41,6 @@ coverage/
 
 # 其他
 .crush/
+# Backup files
+*.bak
+*.pre_*
