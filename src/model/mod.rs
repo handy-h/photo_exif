@@ -178,6 +178,16 @@ pub struct AppState {
     pub is_fullscreen: bool,
     pub editing_tag: Option<ExifTag>,
 
+    // 右键菜单
+    pub context_menu_tag: Option<ExifTag>,
+
+    // 新增字段弹窗
+    pub show_add_tag_popup: bool,
+    pub new_tag_id: String,
+    pub new_tag_ifd: String,
+    pub new_tag_name: String,
+    pub new_tag_value: String,
+
     // 警告
     pub extension_warning: Option<ExtensionMismatch>,
     pub pending_rename: Option<PathBuf>,
@@ -201,6 +211,9 @@ pub struct AppState {
     // 1:1 像素视图模式
     pub pixel_perfect: bool,
 
+    // 鼠标是否在预览区域上方
+    pub pointer_over_preview: bool,
+
     // 对比模式
     pub compare_state: crate::ui::compare::CompareState,
 
@@ -216,6 +229,7 @@ pub struct ThumbnailInfo {
     pub path: PathBuf,
     pub image: Option<egui::ColorImage>,
     pub is_loading: bool,
+    pub texture_id: Option<egui::TextureId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -250,6 +264,12 @@ impl AppState {
             zoom: 1.0,
             is_fullscreen: false,
             editing_tag: None,
+            context_menu_tag: None,
+            show_add_tag_popup: false,
+            new_tag_id: String::new(),
+            new_tag_ifd: String::new(),
+            new_tag_name: String::new(),
+            new_tag_value: String::new(),
             extension_warning: None,
             pending_rename: None,
             status_message: None,
@@ -259,6 +279,7 @@ impl AppState {
             thumbnails: Vec::new(),
             thumbnail_scroll: 0.0,
             pixel_perfect: false,
+            pointer_over_preview: false,
             compare_state: Default::default(),
             gpx_window: Default::default(),
             repair_window: Default::default(),

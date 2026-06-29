@@ -37,7 +37,7 @@ impl ExifReader {
 
     fn ifd_name(in_: In) -> String {
         match in_.index() {
-            0 => "Primary".to_string(),
+            0 => "IFD0".to_string(),
             1 => "Thumbnail".to_string(),
             2 => "ExifIFD".to_string(),
             3 => "GPS".to_string(),

@@ -226,8 +226,19 @@ impl GpxParser {
         let degrees = abs_val.floor() as u32;
         let minutes_full = (abs_val - degrees as f64) * 60.0;
         let minutes = minutes_full.floor() as u32;
-        let seconds = ((minutes_full - minutes as f64) * 60.0).round() as u32;
-        (degrees, minutes, seconds)
+        let mut seconds = ((minutes_full - minutes as f64) * 60.0).round() as u32;
+        if seconds == 60 {
+            seconds = 0;
+            let mut minutes = minutes + 1;
+            if minutes == 60 {
+                minutes = 0;
+                (degrees + 1, minutes, seconds)
+            } else {
+                (degrees, minutes, seconds)
+            }
+        } else {
+            (degrees, minutes, seconds)
+        }
     }
 }
 

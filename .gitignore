@@ -1,7 +1,7 @@
-# Cargo 构建输出
+﻿# Rust Cargo 构建输出
 /target
-/debug
-/release
+debug/
+release/
 
 # IDE 和编辑器配置
 .idea/
@@ -10,6 +10,8 @@
 *.swp
 *.swo
 *~
+.kilocode/
+code-context-mcp/
 
 # 操作系统生成文件
 .DS_Store
@@ -33,6 +35,9 @@ logs/
 coverage/
 .nyc_output/
 *.lcov
+
+# Rust 特有
+*.pdb
 
 # 其他
 .crush/

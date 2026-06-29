@@ -1,4 +1,4 @@
-# Photo EXIF Tool
+﻿# Photo EXIF Tool (v0.1.1)
 
 一款轻量级桌面应用，用于查看、编辑和管理相片的 EXIF 信息。支持单图精细化编辑和批量操作，特别注重隐私保护和格式校验。
 
@@ -37,7 +37,6 @@
 
 ## 截图
 
-![主界面](docs/screenshot.png)
 
 ## 安装
 
@@ -115,7 +114,7 @@ cargo build --release
 - **语言**：Rust 2021+
 - **GUI 框架**：eframe 0.27 (egui)
 - **图片处理**：image 0.25
-- **EXIF 读写**：exif 0.5
+- **EXIF 读写**：exif 0.6
 - **文件对话框**：rfd 0.14
 
 ## 项目结构

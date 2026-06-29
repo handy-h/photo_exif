@@ -35,10 +35,8 @@ impl ExifWriter {
         Ok(())
     }
 
-    /// 从 entries 构建 EXIF APP1 数据（简化版：直接构建 JPEG APP1 段）
+    /// 从 entries 构建 EXIF APP1 数据（多 IFD 版本）
     fn build_exif(entries: &HashMap<ExifTag, ExifValue>) -> Vec<u8> {
-        // 构建简化的 EXIF 数据
-        // 格式: "Exif\0\0" + TIFF header + IFD entries
         let mut exif = Vec::new();
 
         // EXIF header
@@ -47,54 +45,162 @@ impl ExifWriter {
         // TIFF header (little endian)
         exif.extend_from_slice(&[0x49, 0x49]); // "II" little endian
         exif.extend_from_slice(&0x002Au16.to_le_bytes()); // TIFF magic
-        exif.extend_from_slice(&0x0008u32.to_le_bytes()); // offset to first IFD
 
-        // IFD0
-        let entry_count = entries.len() as u16;
-        exif.extend_from_slice(&entry_count.to_le_bytes());
+        // 预留 offset to first IFD
+        let offset_pos = exif.len();
+        exif.extend_from_slice(&0u32.to_le_bytes());
 
-        // 估算数据区偏移量: 8 (header) + 2 (count) + 12 * n (entries) + 4 (next IFD)
-        let data_offset = 8 + 2 + 12 * entries.len() + 4;
-        let mut data_area = Vec::new();
-        let mut data_cursor = data_offset as u32;
-
+        // 按 IFD 分组 entries
+        let mut ifd_groups: std::collections::BTreeMap<String, Vec<(&ExifTag, &ExifValue)>> =
+            std::collections::BTreeMap::new();
         for (tag, value) in entries {
-            // 12 bytes per entry: tag(2) + type(2) + count(4) + value/offset(4)
-            exif.extend_from_slice(&tag.id.to_le_bytes());
+            ifd_groups.entry(tag.ifd.clone()).or_default().push((tag, value));
+        }
 
-            let (type_id, data_bytes) = Self::value_to_bytes(value);
-            exif.extend_from_slice(&type_id.to_le_bytes());
+        // 如果没有 entries，构建一个空的 IFD0
+        if ifd_groups.is_empty() {
+            ifd_groups.insert("IFD0".to_string(), Vec::new());
+        }
 
-            let count = data_bytes.len() as u32;
-            exif.extend_from_slice(&count.to_le_bytes());
+        // IFD 顺序
+        let mut ifd_order: Vec<String> = vec![
+            "IFD0".to_string(),
+            "ExifIFD".to_string(),
+            "GPS".to_string(),
+            "Thumbnail".to_string(),
+            "InteropIFD".to_string(),
+        ];
+        for name in ifd_groups.keys() {
+            if !ifd_order.contains(name) {
+                ifd_order.push(name.clone());
+            }
+        }
+        // 只保留有 entries 的 IFD
+        ifd_order.retain(|name| ifd_groups.contains_key(name));
 
-            if data_bytes.len() <= 4 {
-                // 内联存储
-                let mut inline = data_bytes.clone();
-                inline.resize(4, 0u8);
-                exif.extend_from_slice(&inline);
-            } else {
-                // 偏移量指向数据区
-                exif.extend_from_slice(&data_cursor.to_le_bytes());
-                data_area.extend_from_slice(&data_bytes);
-                // 对齐到偶数
-                if data_area.len() % 2 != 0 {
-                    data_area.push(0);
+        // 计算每个 IFD 的 entry 字节大小（用于估算总大小和偏移量）
+        let mut ifd_entry_sizes: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for (ifd_name, group) in &ifd_groups {
+            let mut size = 0usize;
+            for (_, value) in group {
+                let (_, data_bytes) = Self::value_to_type_id_and_bytes(value);
+                size += 12; // tag + type + count + value/offset
+                if data_bytes.len() > 4 {
+                    size += data_bytes.len();
+                    if data_bytes.len() % 2 != 0 {
+                        size += 1;
+                    }
                 }
-                data_cursor = data_offset as u32 + data_area.len() as u32;
+            }
+            ifd_entry_sizes.insert(ifd_name.clone(), size);
+        }
+
+        // 计算每个 IFD 的总大小（2 count + entries + 4 next）
+        let mut ifd_sizes: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for name in &ifd_order {
+            let entry_size = ifd_entry_sizes.get(name).copied().unwrap_or(0);
+            ifd_sizes.insert(name.clone(), 2 + entry_size + 4);
+        }
+
+        // 计算 IFD 偏移量（相对于 TIFF header 开始，即 0x0008）
+        let mut ifd_offsets: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
+        let mut current_offset = 8u32;
+        for name in &ifd_order {
+            if let Some(size) = ifd_sizes.get(name) {
+                ifd_offsets.insert(name.clone(), current_offset);
+                current_offset += *size as u32;
             }
         }
 
-        // Next IFD offset (0 = no more IFDs)
-        exif.extend_from_slice(&0x00000000u32.to_le_bytes());
+        // 数据区起始偏移
+        let data_area_start = current_offset;
 
-        // 数据区
+        // 构建每个 IFD 的 entry 和数据
+        let mut ifd_entries: std::collections::HashMap<String, Vec<u8>> =
+            std::collections::HashMap::new();
+        let mut data_area = Vec::new();
+        let mut data_cursor = 0u32;
+
+        for (ifd_name, group) in &ifd_groups {
+            let entry_bytes =
+                Self::build_ifd_entries(group, &mut data_area, data_area_start, &mut data_cursor);
+            ifd_entries.insert(ifd_name.clone(), entry_bytes);
+        }
+
+        // 写入第一个 IFD 偏移到 TIFF header
+        if let Some(first_name) = ifd_order.first() {
+            if let Some(&offset) = ifd_offsets.get(first_name) {
+                exif[offset_pos..offset_pos + 4].copy_from_slice(&offset.to_le_bytes());
+            }
+        }
+
+        // 写入 IFD 链表
+        for (idx, name) in ifd_order.iter().enumerate() {
+            if let Some(entry_bytes) = ifd_entries.get(name) {
+                // entry count
+                exif.extend_from_slice(&(entry_bytes.len() / 12).to_le_bytes());
+                // entries
+                exif.extend_from_slice(entry_bytes);
+                // Next IFD offset
+                if idx + 1 < ifd_order.len() && ifd_offsets.contains_key(&ifd_order[idx + 1]) {
+                    let next_offset = ifd_offsets[&ifd_order[idx + 1]];
+                    exif.extend_from_slice(&next_offset.to_le_bytes());
+                } else {
+                    exif.extend_from_slice(&0u32.to_le_bytes());
+                }
+            }
+        }
+
+        // 数据区对齐到 2 字节边界
+        if data_area.len() % 2 != 0 {
+            data_area.push(0);
+        }
         exif.extend_from_slice(&data_area);
 
         exif
     }
 
-    fn value_to_bytes(value: &ExifValue) -> (u16, Vec<u8>) {
+    fn build_ifd_entries(
+        entries: &[(&ExifTag, &ExifValue)],
+        data_area: &mut Vec<u8>,
+        data_area_start: u32,
+        data_cursor: &mut u32,
+    ) -> Vec<u8> {
+        let mut entry_bytes = Vec::new();
+        for (tag, value) in entries {
+            entry_bytes.extend_from_slice(&tag.id.to_le_bytes());
+
+            let (type_id, data_bytes) = Self::value_to_type_id_and_bytes(value);
+            entry_bytes.extend_from_slice(&type_id.to_le_bytes());
+
+            let count = data_bytes.len() as u32;
+            entry_bytes.extend_from_slice(&count.to_le_bytes());
+
+            if data_bytes.len() <= 4 {
+                // 内联存储
+                let mut inline = data_bytes.clone();
+                inline.resize(4, 0u8);
+                entry_bytes.extend_from_slice(&inline);
+            } else {
+                // 偏移量指向数据区
+                let offset = data_area_start + *data_cursor;
+                entry_bytes.extend_from_slice(&offset.to_le_bytes());
+                data_area.extend_from_slice(&data_bytes);
+                // 对齐到偶数
+                if data_bytes.len() % 2 != 0 {
+                    data_area.push(0);
+                    *data_cursor += 1;
+                }
+                *data_cursor += data_bytes.len() as u32;
+            }
+        }
+        entry_bytes
+    }
+
+    fn value_to_type_id_and_bytes(value: &ExifValue) -> (u16, Vec<u8>) {
         match value {
             ExifValue::Byte(v) => (1, v.clone()),
             ExifValue::Ascii(s) => {

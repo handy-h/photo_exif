@@ -1419,7 +1419,7 @@ dependencies = [
 [[package]]
 name = "exif"
 version = "0.6.1"
-source = "git+https://github.com/kamadak/exif-rs.git#7cb491cd22aa4a586f37c0c0c3ef5c9ae207d337"
+source = "git+https://github.com/kamadak/exif-rs.git?rev=7cb491cd22aa4a586f37c0c0c3ef5c9ae207d337#7cb491cd22aa4a586f37c0c0c3ef5c9ae207d337"
 dependencies = [
  "mutate_once",
 ]
@@ -2852,7 +2852,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "photo_exit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",

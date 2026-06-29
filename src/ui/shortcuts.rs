@@ -78,9 +78,9 @@ pub fn handle_shortcuts(app: &mut AppState, ctx: &egui::Context) {
         app.pixel_perfect = false;
     }
 
-    // 滚轮缩放
+    // 滚轮缩放（仅在鼠标位于预览区域时生效）
     let scroll_delta = input.smooth_scroll_delta.y;
-    if scroll_delta.abs() > 0.0 {
+    if scroll_delta.abs() > 0.0 && app.pointer_over_preview {
         if scroll_delta > 0.0 {
             app.zoom = (app.zoom * 1.1).min(10.0);
         } else {

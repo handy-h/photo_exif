@@ -1,6 +1,6 @@
-[package]
+﻿[package]
 name = "photo_exit"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [lib]
@@ -15,7 +15,7 @@ path = "src/main.rs"
 eframe = { version = "0.27", features = ["glow"] }
 egui = "0.27"
 image = { version = "0.25", features = ["jpeg", "png", "webp", "tiff", "bmp"] }
-exif = { git = "https://github.com/kamadak/exif-rs.git" }
+exif = { git = "https://github.com/kamadak/exif-rs.git", rev = "7cb491cd22aa4a586f37c0c0c3ef5c9ae207d337" }
 rfd = "0.14"
 chrono = "0.4"
 anyhow = "1.0"

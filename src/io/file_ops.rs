@@ -248,11 +248,16 @@ impl FileOps {
         // 尝试从 EXIF 提取日期、ISO、光圈信息
         let mut parts = Vec::new();
 
-        // 拍摄时间
-        if let Some(v) = app.exif_entries.values().find(|v| v.to_display_string().contains('-') || v.to_display_string().contains(':')) {
-            let s = v.to_display_string().chars().filter(|c| c.is_ascii_digit()).take(14).collect::<String>();
-            if s.len() >= 8 {
-                parts.push(s.chars().take(8).collect());
+        // 拍摄时间 - 直接按 tag ID 查找
+        let time_tags = [(0x9003, "ExifIFD", "DateTimeOriginal"), (0x9004, "ExifIFD", "DateTimeDigitized"), (0x0132, "IFD0", "DateTime")];
+        for &(tag_id, ifd, tag_name) in &time_tags {
+            if let Some(v) = app.exif_entries.get(&ExifTag::new(tag_id, ifd, tag_name)) {
+                let s = v.to_display_string();
+                let digits: String = s.chars().filter(|c| c.is_ascii_digit()).take(14).collect();
+                if digits.len() >= 8 {
+                    parts.push(digits.chars().take(8).collect());
+                    break;
+                }
             }
         }
 
@@ -330,6 +335,7 @@ impl FileOps {
                     None
                 },
                 is_loading: !is_current,
+                texture_id: None,
             };
             app.thumbnails.push(thumb);
         }

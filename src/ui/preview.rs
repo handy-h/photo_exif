@@ -8,6 +8,8 @@ pub fn render_preview_panel(app: &mut AppState, ctx: &egui::Context) {
     }
 
     egui::CentralPanel::default().show(ctx, |ui| {
+        app.pointer_over_preview = ui.ui_contains_pointer();
+
         if let Some(color_img) = &app.current_image {
             let available_size = ui.available_size();
             let img_w = color_img.size[0] as f32;
@@ -107,6 +109,8 @@ fn render_fullscreen_preview(app: &mut AppState, ctx: &egui::Context) {
         .map(|img| (img.size[0], img.size[1], img.clone()));
 
     egui::CentralPanel::default().show(ctx, |ui| {
+        app.pointer_over_preview = ui.ui_contains_pointer();
+
         if let Some((w, h, color_img)) = img_info {
             // 获取或创建纹理
             let texture = ctx.load_texture(

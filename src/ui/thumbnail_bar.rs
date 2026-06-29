@@ -44,18 +44,29 @@ pub fn render_thumbnail_bar(app: &mut AppState, ctx: &egui::Context) {
 
                                 if has_image {
                                     if let Some(img) = app.thumbnails[i].image.as_ref() {
-                                        let texture = ctx.load_texture(
-                                            format!("thumb_{}", i),
-                                            img.clone(),
-                                            egui::TextureOptions::LINEAR,
-                                        );
+                                        let needs_reload =
+                                            app.thumbnails[i].texture_id.is_none()
+                                                || app.thumbnails[i].image.as_ref() != Some(img);
+
+                                        let texture_id = if needs_reload {
+                                            let texture = ctx.load_texture(
+                                                format!("thumb_{}", i),
+                                                img.clone(),
+                                                egui::TextureOptions::LINEAR,
+                                            );
+                                            app.thumbnails[i].texture_id = Some(texture.id());
+                                            texture.id()
+                                        } else {
+                                            app.thumbnails[i].texture_id.unwrap()
+                                        };
+
                                         let (rect, _) = ui.allocate_exact_size(
                                             egui::vec2(thumb_size, thumb_size),
                                             egui::Sense::click(),
                                         );
                                         let painter = ui.painter();
                                         painter.image(
-                                            texture.id(),
+                                            texture_id,
                                             rect,
                                             egui::Rect::from_min_max(
                                                 egui::pos2(0.0, 0.0),
