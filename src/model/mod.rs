@@ -28,19 +28,12 @@ impl ExifGroup {
     }
 
     pub fn default_expanded(self) -> bool {
-        match self {
-            ExifGroup::CameraInfo => true,
-            ExifGroup::Exposure => true,
-            ExifGroup::GPS => true,
-            ExifGroup::Lens => true,
-            ExifGroup::Thumbnail => false,
-            ExifGroup::Other => false,
-        }
+        matches!(self, ExifGroup::CameraInfo | ExifGroup::Exposure | ExifGroup::GPS | ExifGroup::Lens)
     }
 }
 
 // ============================================================================
-// ExifTag - EXIF 标签（tag id + 显示名）
+// ExifTag - EXIF 标签标识
 // ============================================================================
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -58,14 +51,10 @@ impl ExifTag {
             name: name.to_string(),
         }
     }
-
-    pub fn display_name(&self) -> String {
-        format!("{} ({})", self.name, self.ifd)
-    }
 }
 
 // ============================================================================
-// ExifValue - EXIF 值的类型枚举
+// ExifValue - EXIF 值类型
 // ============================================================================
 
 #[derive(Debug, Clone, PartialEq)]
@@ -81,29 +70,33 @@ pub enum ExifValue {
 }
 
 impl ExifValue {
-    /// 将值格式化为可读字符串
+    /// 转换为显示字符串
     pub fn to_display_string(&self) -> String {
         match self {
             ExifValue::Byte(v) => format!("{:02X?}", v),
-            ExifValue::Ascii(s) => s.trim_end_matches('\0').to_string(),
+            ExifValue::Ascii(v) => v.clone(),
             ExifValue::Short(v) => v.to_string(),
             ExifValue::Long(v) => v.to_string(),
             ExifValue::Rational(n, d) => {
                 if *d == 0 {
-                    "0".to_string()
+                    format!("{}/{}", n, d)
+                } else if *d == 1 {
+                    n.to_string()
                 } else if *n % *d == 0 {
                     format!("{}", n / d)
                 } else {
-                    format!("{}/{}", n, d)
+                    let f = *n as f64 / *d as f64;
+                    format!("{:.2}", f)
                 }
             }
             ExifValue::SRational(n, d) => {
                 if *d == 0 {
-                    "0".to_string()
-                } else if *n % *d == 0 {
-                    format!("{}", n / d)
-                } else {
                     format!("{}/{}", n, d)
+                } else if *d == 1 {
+                    n.to_string()
+                } else {
+                    let f = *n as f64 / *d as f64;
+                    format!("{:.2}", f)
                 }
             }
             ExifValue::Undefined(v) => format!("{:02X?}", v),
@@ -131,30 +124,33 @@ impl ExifValue {
         if let Ok(v) = s.parse::<u32>() {
             return ExifValue::Long(v);
         }
-        if let Ok(v) = s.parse::<f64>() {
-            let scaled = (v * 10000.0).round() as u32;
-            return ExifValue::Rational(scaled, 10000);
-        }
         ExifValue::Ascii(s.to_string())
     }
 }
 
 // ============================================================================
-// ExtensionMismatch - 扩展名校验结果
+// ExtensionMismatch - 扩展名不匹配警告
 // ============================================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExtensionMismatch {
     pub actual_format: String,
-    pub expected_ext: String,
-    pub actual_ext: String,
+    pub extension: String,
+}
+
+impl ExtensionMismatch {
+    pub fn new(actual_format: String, extension: String) -> Self {
+        Self {
+            actual_format,
+            extension,
+        }
+    }
 }
 
 // ============================================================================
 // AppState - 应用全局状态
 // ============================================================================
 
-/// AppState - 应用全局状态
 pub struct AppState {
     // 文件列表
     pub folder_path: Option<PathBuf>,
@@ -211,8 +207,14 @@ pub struct AppState {
     // 1:1 像素视图模式
     pub pixel_perfect: bool,
 
+    // 纹理缓存（避免每帧重复加载）
+    pub current_texture: Option<egui::TextureHandle>,
+
     // 鼠标是否在预览区域上方
     pub pointer_over_preview: bool,
+
+    // 最近打开菜单
+    pub show_recent_menu: bool,
 
     // 对比模式
     pub compare_state: crate::ui::compare::CompareState,
@@ -279,87 +281,96 @@ impl AppState {
             thumbnails: Vec::new(),
             thumbnail_scroll: 0.0,
             pixel_perfect: false,
+            current_texture: None,
             pointer_over_preview: false,
+            show_recent_menu: false,
             compare_state: Default::default(),
             gpx_window: Default::default(),
             repair_window: Default::default(),
         }
     }
 
+    /// 检查是否有隐私风险字段
+    pub fn has_privacy_risk(&self) -> Vec<String> {
+        let mut risks = Vec::new();
+        for (tag, _) in &self.exif_entries {
+            let name_lower = tag.name.to_lowercase();
+            if name_lower.contains("gps") || name_lower.contains("location") {
+                risks.push(format!("GPS: {}", tag.name));
+            }
+            if name_lower.contains("serial") || name_lower.contains("序列号") {
+                risks.push(format!("序列号: {}", tag.name));
+            }
+        }
+        risks
+    }
+
+    /// 获取当前更改列表
+    pub fn get_changes(&self) -> Vec<(ExifTag, ExifValue, ExifValue)> {
+        let mut changes = Vec::new();
+        for (tag, new_val) in &self.exif_entries {
+            if let Some(old_val) = self.original_exif.get(tag) {
+                if old_val != new_val {
+                    changes.push((tag.clone(), old_val.clone(), new_val.clone()));
+                }
+            } else {
+                changes.push((tag.clone(), ExifValue::Ascii(String::new()), new_val.clone()));
+            }
+        }
+        // 检查被删除的字段
+        for (tag, old_val) in &self.original_exif {
+            if !self.exif_entries.contains_key(tag) {
+                changes.push((tag.clone(), old_val.clone(), ExifValue::Ascii(String::new())));
+            }
+        }
+        changes
+    }
+
     pub fn current_path(&self) -> Option<&PathBuf> {
         self.file_paths.get(self.current_index)
     }
 
+    /// 检查是否有未保存的更改
     pub fn has_unsaved_changes(&self) -> bool {
         self.exif_entries != self.original_exif
     }
 
-    pub fn push_undo(&mut self, tag: ExifTag, old: ExifValue, new: ExifValue) {
-        self.undo_stack.push((tag, old, new));
+    /// 记录 undo
+    pub fn push_undo(&mut self, tag: ExifTag, old_value: ExifValue, new_value: ExifValue) {
+        self.undo_stack.push((tag, old_value, new_value));
+        // 限制 undo 栈大小
         if self.undo_stack.len() > 50 {
             self.undo_stack.remove(0);
         }
     }
 
+    /// 撤销
     pub fn undo(&mut self) -> bool {
-        if let Some((tag, old, _)) = self.undo_stack.pop() {
-            self.exif_entries.insert(tag.clone(), old);
+        if let Some((tag, old_value, _)) = self.undo_stack.pop() {
+            self.exif_entries.insert(tag, old_value);
             true
         } else {
             false
         }
     }
 
-    pub fn set_status(&mut self, msg: impl Into<String>, level: StatusLevel) {
-        self.status_message = Some((msg.into(), level));
+    /// 设置状态消息
+    pub fn set_status(&mut self, message: impl Into<String>, level: StatusLevel) {
+        self.status_message = Some((message.into(), level));
     }
 
+    /// 清除状态消息
     pub fn clear_status(&mut self) {
         self.status_message = None;
     }
-
-    /// 检测当前 EXIF 是否有隐私风险（GPS / 个人信息）
-    pub fn has_privacy_risk(&self) -> Vec<ExifTag> {
-        self.exif_entries
-            .keys()
-            .filter(|tag| {
-                // GPS 相关
-                tag.ifd == "GPS"
-                // 版权
-                || tag.id == 0x8298
-                // 制造商备注（可能含序列号）
-                || tag.id == 0x927C
-                // 用户注释
-                || tag.id == 0x9286
-                // 镜头序列号等
-                || tag.id == 0xA435
-            })
-            .cloned()
-            .collect()
-    }
-
-    /// 获取变更列表（用于写入确认）
-    pub fn get_changes(&self) -> Vec<(ExifTag, Option<ExifValue>, Option<ExifValue>)> {
-        let mut changes = Vec::new();
-
-        // 修改和新增
-        for (tag, value) in &self.exif_entries {
-            if let Some(orig) = self.original_exif.get(tag) {
-                if orig != value {
-                    changes.push((tag.clone(), Some(orig.clone()), Some(value.clone())));
-                }
-            } else {
-                changes.push((tag.clone(), None, Some(value.clone())));
-            }
-        }
-
-        // 删除
-        for (tag, value) in &self.original_exif {
-            if !self.exif_entries.contains_key(tag) {
-                changes.push((tag.clone(), Some(value.clone()), None));
-            }
-        }
-
-        changes
-    }
 }
+
+// ============================================================================
+// 导出
+// ============================================================================
+
+// pub use exif_entry::*;
+// pub use image_state::*;
+
+mod exif_entry;
+mod image_state;

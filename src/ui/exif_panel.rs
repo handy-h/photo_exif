@@ -1,26 +1,29 @@
 use crate::model::{AppState, ExifTag, ExifValue};
 use crate::exif::ExifFormatter;
+use egui::containers::panel::Panel;
 
 /// 渲染右侧 EXIF 信息面板
-pub fn render_exif_panel(app: &mut AppState, ctx: &egui::Context) {
+pub fn render_exif_panel(app: &mut AppState, ui: &mut egui::Ui) {
     if app.is_fullscreen {
         return;
     }
 
+    let ctx = ui.ctx().clone();
+
     // 写入确认对话框
     if app.pending_save {
-        render_save_confirmation(app, ctx);
+        render_save_confirmation(app, &ctx);
     }
 
     // 新增字段弹窗
     if app.show_add_tag_popup {
-        render_add_tag_popup(app, ctx);
+        render_add_tag_popup(app, &ctx);
     }
 
-    egui::SidePanel::right("exif_panel")
+    Panel::right("exif_panel")
         .resizable(true)
-        .default_width(450.0)
-        .show(ctx, |ui| {
+        .default_size(450.0)
+        .show(ui, |ui| {
             ui.vertical(|ui| {
                 render_extension_warning(app, ui);
                 render_privacy_warning(app, ui);
@@ -61,7 +64,7 @@ fn render_extension_warning(app: &mut AppState, ui: &mut egui::Ui) {
             ui.colored_label(egui::Color32::YELLOW, "⚠");
             ui.label(format!(
                 "实际格式: {}, 扩展名: {}",
-                mismatch.actual_format, mismatch.actual_ext
+                mismatch.actual_format, mismatch.extension
             ));
         });
 
@@ -90,8 +93,16 @@ fn render_privacy_warning(app: &mut AppState, ui: &mut egui::Ui) {
             });
             ui.horizontal(|ui| {
                 if ui.button("一键清除隐私字段").clicked() {
-                    for tag in &risks {
-                        app.exif_entries.remove(tag);
+                    for tag_name in &risks {
+                        // 查找并删除对应的标签
+                        let tag_to_remove: Option<ExifTag> = app.exif_entries.keys()
+                            .find(|t| t.name == *tag_name)
+                            .cloned();
+                        if let Some(tag) = tag_to_remove {
+                            if let Some(old) = app.exif_entries.remove(&tag) {
+                                app.push_undo(tag.clone(), old, ExifValue::Ascii(String::new()));
+                            }
+                        }
                     }
                     app.set_status(
                         format!("已清除 {} 个隐私字段", risks.len()),
@@ -185,10 +196,14 @@ fn get_field_value(app: &AppState, id: u16, ifd: &str) -> String {
 }
 
 fn set_field_value(app: &mut AppState, id: u16, ifd: &str, name: &str, text: &str) {
+    let tag = ExifTag::new(id, ifd, name);
     if text.is_empty() {
+        // 用户清空字段：删除该字段并记录 undo
+        if let Some(old_value) = app.exif_entries.remove(&tag) {
+            app.push_undo(tag, old_value, ExifValue::Ascii(String::new()));
+        }
         return;
     }
-    let tag = ExifTag::new(id, ifd, name);
     let new_value = ExifValue::from_string(text);
     if let Some(old_value) = app.exif_entries.get(&tag) {
         app.push_undo(tag.clone(), old_value.clone(), new_value.clone());
@@ -286,7 +301,7 @@ fn render_exif_row(app: &mut AppState, ui: &mut egui::Ui, tag: &ExifTag, value: 
                 }
             } else {
                 // 双击进入编辑
-                let label_response = ui.add(egui::Label::new(&display_value).wrap(true));
+                let label_response = ui.add(egui::Label::new(&display_value).wrap());
                 if label_response.double_clicked() {
                     app.editing_tag = Some(tag.clone());
                 }
@@ -297,13 +312,13 @@ fn render_exif_row(app: &mut AppState, ui: &mut egui::Ui, tag: &ExifTag, value: 
         row_response.response.context_menu(|ui| {
             if ui.button("✏️ 修改").clicked() {
                 app.editing_tag = Some(tag.clone());
-                ui.close_menu();
+                ui.close();
             }
             if ui.button("🗑️ 删除").clicked() {
                 app.selected_tags.clear();
                 app.selected_tags.push(tag.clone());
                 crate::io::FileOps::delete_selected(app);
-                ui.close_menu();
+                ui.close();
             }
             ui.separator();
             if ui.button("➕ 新增字段").clicked() {
@@ -313,7 +328,7 @@ fn render_exif_row(app: &mut AppState, ui: &mut egui::Ui, tag: &ExifTag, value: 
                 app.new_tag_ifd = String::new();
                 app.new_tag_name = String::new();
                 app.new_tag_value = String::new();
-                ui.close_menu();
+                ui.close();
             }
         });
     });
@@ -353,14 +368,10 @@ fn render_save_confirmation(app: &mut AppState, ctx: &egui::Context) {
                             for (tag, old, new) in &changes {
                                 ui.label(&tag.name);
                                 ui.label(
-                                    old.as_ref()
-                                        .map(|v| v.to_display_string())
-                                        .unwrap_or_else(|| "(新增)".into()),
+                                    old.to_display_string()
                                 );
                                 ui.label(
-                                    new.as_ref()
-                                        .map(|v| v.to_display_string())
-                                        .unwrap_or_else(|| "(删除)".into()),
+                                    new.to_display_string()
                                 );
                                 ui.end_row();
                             }

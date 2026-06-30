@@ -16,7 +16,7 @@ fn main() -> eframe::Result<()> {
         Box::new(|cc| {
             // 加载中文字体
             setup_chinese_fonts(&cc.egui_ctx);
-            Box::new(PhotoExitApp::new(cc))
+            Ok(Box::new(PhotoExitApp::new(cc)))
         }),
     )
 }

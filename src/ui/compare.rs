@@ -32,7 +32,7 @@ impl Default for CompareState {
 impl CompareState {
     /// 加载左侧图片
     pub fn load_left(&mut self, path: PathBuf) -> Result<()> {
-        let (entries, _) = ExifReader::read(&path).unwrap_or_default();
+        let (entries, _) = ExifReader::read(&path)?;
         self.left_entries = entries;
         self.left_path = Some(path);
         Ok(())
@@ -40,7 +40,7 @@ impl CompareState {
 
     /// 加载右侧图片
     pub fn load_right(&mut self, path: PathBuf) -> Result<()> {
-        let (entries, _) = ExifReader::read(&path).unwrap_or_default();
+        let (entries, _) = ExifReader::read(&path)?;
         self.right_entries = entries;
         self.right_path = Some(path);
         Ok(())
@@ -143,7 +143,7 @@ pub struct DiffEntry {
 
 /// 渲染对比模式窗口
 pub fn render_compare_window(
-    ctx: &egui::Context,
+    ui: &mut egui::Ui,
     compare: &mut CompareState,
     app: &mut AppState,
 ) {
@@ -216,7 +216,7 @@ pub fn render_compare_window(
         .default_width(800.0)
         .default_height(600.0)
         .resizable(true)
-        .show(ctx, |ui| {
+        .show(ui.ctx(), |ui| {
             // 左侧选择
             ui.horizontal(|ui| {
                 ui.label("左侧:");

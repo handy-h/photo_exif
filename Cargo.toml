@@ -12,8 +12,8 @@ name = "photo_exit"
 path = "src/main.rs"
 
 [dependencies]
-eframe = { version = "0.27", features = ["glow"] }
-egui = "0.27"
+eframe = { version = "0.35", default-features = false, features = ["glow", "default_fonts"] }
+egui = "0.35"
 image = { version = "0.25", features = ["jpeg", "png", "webp", "tiff", "bmp"] }
 exif = { git = "https://github.com/kamadak/exif-rs.git", rev = "7cb491cd22aa4a586f37c0c0c3ef5c9ae207d337" }
 rfd = { version = "0.17", features = ["common-controls-v6"] }

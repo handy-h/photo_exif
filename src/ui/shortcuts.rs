@@ -1,8 +1,8 @@
 use crate::model::AppState;
 
 /// 处理键盘快捷键
-pub fn handle_shortcuts(app: &mut AppState, ctx: &egui::Context) {
-    let input = ctx.input(|i| i.clone());
+pub fn handle_shortcuts(app: &mut AppState, ui: &mut egui::Ui) {
+    let input = ui.input(|i| i.clone());
 
     // ← → 切换照片
     if input.key_pressed(egui::Key::ArrowLeft) {
@@ -80,12 +80,10 @@ pub fn handle_shortcuts(app: &mut AppState, ctx: &egui::Context) {
 
     // 滚轮缩放（仅在鼠标位于预览区域时生效）
     let scroll_delta = input.smooth_scroll_delta.y;
-    if scroll_delta.abs() > 0.0 && app.pointer_over_preview {
-        if scroll_delta > 0.0 {
-            app.zoom = (app.zoom * 1.1).min(10.0);
-        } else {
-            app.zoom = (app.zoom / 1.1).max(0.1);
-        }
+    const ZOOM_THRESHOLD: f32 = 10.0;
+    if scroll_delta.abs() > ZOOM_THRESHOLD && app.pointer_over_preview {
+        let factor = if scroll_delta > 0.0 { 1.1 } else { 1.0 / 1.1 };
+        app.zoom = (app.zoom * factor).clamp(0.1, 10.0);
         app.pixel_perfect = false;
     }
 

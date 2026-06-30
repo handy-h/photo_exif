@@ -1,13 +1,15 @@
 use crate::model::AppState;
+use egui::containers::panel::CentralPanel;
+use egui::epaint::StrokeKind;
 
 /// 渲染中央图片预览区（主预览区域）
-pub fn render_preview_panel(app: &mut AppState, ctx: &egui::Context) {
+pub fn render_preview_panel(app: &mut AppState, ui: &mut egui::Ui) {
     if app.is_fullscreen {
-        render_fullscreen_preview(app, ctx);
+        render_fullscreen_preview(app, ui);
         return;
     }
 
-    egui::CentralPanel::default().show(ctx, |ui| {
+    CentralPanel::default().show(ui, |ui| {
         app.pointer_over_preview = ui.ui_contains_pointer();
 
         if let Some(color_img) = &app.current_image {
@@ -15,12 +17,28 @@ pub fn render_preview_panel(app: &mut AppState, ctx: &egui::Context) {
             let img_w = color_img.size[0] as f32;
             let img_h = color_img.size[1] as f32;
 
-            // 获取或创建纹理
-            let texture = ui.ctx().load_texture(
-                "current_image",
-                color_img.clone(),
-                egui::TextureOptions::LINEAR,
-            );
+            // 获取或创建纹理（使用缓存避免重复加载）
+            let texture = if let Some(ref cached) = app.current_texture {
+                if cached.name() == "current_image" {
+                    cached.clone()
+                } else {
+                    let new_tex = ui.ctx().load_texture(
+                        "current_image",
+                        color_img.clone(),
+                        egui::TextureOptions::LINEAR,
+                    );
+                    app.current_texture = Some(new_tex.clone());
+                    new_tex
+                }
+            } else {
+                let new_tex = ui.ctx().load_texture(
+                    "current_image",
+                    color_img.clone(),
+                    egui::TextureOptions::LINEAR,
+                );
+                app.current_texture = Some(new_tex.clone());
+                new_tex
+            };
 
             // 计算显示尺寸：适应容器或 1:1 像素
             let (display_size, scale_label) = if app.pixel_perfect {
@@ -84,6 +102,7 @@ pub fn render_preview_panel(app: &mut AppState, ctx: &egui::Context) {
                 rect.shrink(1.0),
                 0.0,
                 egui::Stroke::new(1.0, egui::Color32::from_gray(200)),
+                StrokeKind::Inside,
             );
 
             ui.centered_and_justified(|ui| {
@@ -101,19 +120,21 @@ pub fn render_preview_panel(app: &mut AppState, ctx: &egui::Context) {
     });
 }
 
-fn render_fullscreen_preview(app: &mut AppState, ctx: &egui::Context) {
+fn render_fullscreen_preview(app: &mut AppState, ui: &mut egui::Ui) {
     // 提取图片信息避免借用冲突
     let img_info = app
         .current_image
         .as_ref()
         .map(|img| (img.size[0], img.size[1], img.clone()));
 
-    egui::CentralPanel::default().show(ctx, |ui| {
+    let ctx = ui.ctx().clone();
+
+    CentralPanel::default().show(ui, |ui| {
         app.pointer_over_preview = ui.ui_contains_pointer();
 
         if let Some((w, h, color_img)) = img_info {
             // 获取或创建纹理
-            let texture = ctx.load_texture(
+            let texture = ui.ctx().load_texture(
                 "current_image",
                 color_img,
                 egui::TextureOptions::LINEAR,

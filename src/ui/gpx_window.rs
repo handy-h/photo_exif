@@ -121,7 +121,7 @@ impl GpxWindowState {
         }
     }
 
-    /// 对当前图片写入 GPS
+    /// 对当前图片写入 GPS（带 undo 记录）
     pub fn write_to_current(&self, app: &mut AppState) -> Result<()> {
         let matcher = self
             .matcher
@@ -145,6 +145,26 @@ impl GpxWindowState {
             .ok_or_else(|| anyhow::anyhow!("无法匹配 GPS 轨迹点（时间差 > 5分钟）"))?;
 
         let (lat_dms, lat_ref, lon_dms, lon_ref, ele) = match_result;
+
+        // 记录原始 GPS 值用于 undo
+        let gps_tags = [
+            (0x0001, "GPS", "纬度方向"),
+            (0x0002, "GPS", "纬度"),
+            (0x0003, "GPS", "经度方向"),
+            (0x0004, "GPS", "经度"),
+            (0x0005, "GPS", "高度参考"),
+            (0x0006, "GPS", "高度"),
+            (0x0007, "GPS", "GPS时间"),
+        ];
+        let mut old_entries = Vec::new();
+        for (id, ifd, name) in &gps_tags {
+            let tag = ExifTag::new(*id, *ifd, *name);
+            if let Some(old) = app.exif_entries.get(&tag) {
+                old_entries.push((tag.clone(), Some(old.clone())));
+            } else {
+                old_entries.push((tag.clone(), None));
+            }
+        }
 
         app.exif_entries.insert(
             ExifTag::new(0x0001, "GPS", "纬度方向"),
@@ -178,6 +198,12 @@ impl GpxWindowState {
             ExifTag::new(0x0007, "GPS", "GPS时间"),
             ExifValue::Ascii(photo_time.clone()),
         );
+
+        // 记录 undo：使用批量标签标记
+        for (tag, old) in &old_entries {
+            let new_val = app.exif_entries.get(tag).cloned().unwrap_or(ExifValue::Ascii(String::new()));
+            app.push_undo(tag.clone(), old.clone().unwrap_or(ExifValue::Ascii(String::new())), new_val);
+        }
 
         ExifWriter::write(&path, &app.exif_entries)?;
         app.original_exif = app.exif_entries.clone();
@@ -274,7 +300,7 @@ impl GpxWindowState {
 
 /// 渲染 GPX GPS 写入窗口
 pub fn render_gpx_window(
-    ctx: &egui::Context,
+    ui: &mut egui::Ui,
     gpx_state: &mut GpxWindowState,
     app: &mut AppState,
 ) {
@@ -304,7 +330,7 @@ pub fn render_gpx_window(
         .default_width(700.0)
         .default_height(500.0)
         .resizable(true)
-        .show(ctx, |ui| {
+        .show(ui.ctx(), |ui| {
             ui.horizontal(|ui| {
                 ui.label("GPX 轨迹文件:");
                 if let Some(ref name) = gpx_file_name {

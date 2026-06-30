@@ -21,7 +21,7 @@ impl Default for RepairWindowState {
 
 /// 渲染 EXIF 校验和修复窗口
 pub fn render_repair_window(
-    ctx: &egui::Context,
+    ui: &mut egui::Ui,
     repair_state: &mut RepairWindowState,
     app: &mut AppState,
 ) {
@@ -49,7 +49,7 @@ pub fn render_repair_window(
         .default_width(500.0)
         .default_height(400.0)
         .resizable(true)
-        .show(ctx, |ui| {
+        .show(ui.ctx(), |ui| {
             let _path = match &current_path {
                 Some(p) => p,
                 None => {

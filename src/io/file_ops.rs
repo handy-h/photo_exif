@@ -26,7 +26,8 @@ impl FileOps {
         app.editing_tag = None;
         app.pixel_perfect = false;
 
-        // 重置分组展开状态
+        // 清除纹理缓存（新图片需要重新创建纹理）
+        app.current_texture = None;
         app.expanded_groups
             .insert(crate::model::ExifGroup::CameraInfo, true);
         app.expanded_groups
@@ -176,7 +177,21 @@ impl FileOps {
     /// 修正文件扩展名
     pub fn fix_extension(app: &mut AppState) -> Result<()> {
         if let Some(path) = app.current_path().cloned() {
-            let new_path = ExifValidator::fix_extension(&path)?;
+            // 检测实际格式
+            let header = std::fs::read(&path)?;
+            let actual_format = match image::guess_format(&header) {
+                Ok(f) => f,
+                Err(_) => return Err(anyhow::anyhow!("无法检测文件格式")),
+            };
+            
+            let expected_ext = actual_format
+                .extensions_str()
+                .into_iter()
+                .next()
+                .map_or("bin", |v| v);
+            
+            let new_path = path.with_extension(expected_ext);
+            std::fs::rename(&path, &new_path)?;
 
             // 更新文件列表
             if let Some(idx) = app.file_paths.iter().position(|p| p == &path) {
